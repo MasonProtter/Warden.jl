@@ -1,0 +1,11 @@
+name = "Warden"
+uuid = "3c4d32a7-ddde-42a4-8649-ff03c986df4b"
+version = "0.1.0"
+authors = ["Mason Protter <mason.protter@icloud.com>"]
+
+[deps]
+InteractiveUtils = "b77e0a4c-d291-57a0-90e8-8db25a27a240"
+
+[compat]
+InteractiveUtils = "1.11.0"
+julia = "1.12"
