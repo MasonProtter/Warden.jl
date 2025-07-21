@@ -6,7 +6,9 @@ using .EAUtils
 
 using .Base: @propagate_inbounds
 
-export no_escape, code_escapes, @code_escapes
+export no_escape, code_escapes, @code_escapes, default_buffer
+
+using Bumper: Bumper
 
 struct WardedArray{T, N, AnalysisHandle} <: DenseArray{T, N}
     ptr::Ptr{T}
@@ -16,16 +18,12 @@ end
 const WardedVector{T, AnalysisHandle} = WardedArray{T, 1, AnalysisHandle}
 Base.size(v::WardedArray) = v.size
 @propagate_inbounds function Base.getindex(v::WardedArray, i::Integer)
-    @boundscheck (i ∈ 1:length(v)) || bnds_err(length(v), i)
-    GC.@preserve v begin
-        unsafe_load(v.ptr, i)
-    end
+    @boundscheck i ∈ 1:length(v) || BndsErr(length(v), i)
+    unsafe_load(v.ptr, i)
 end
 @propagate_inbounds function Base.setindex!(v::WardedArray{T}, x, i::Integer) where {T}
-    @boundscheck (i ∈ 1:length(v)) || bnds_err(length(v), i)
-    GC.@preserve v begin
-        unsafe_store!(v.ptr, convert(T, x), i)
-    end
+    @boundscheck i ∈ 1:length(v) || BndsErr(size(v), i)
+    unsafe_store!(v.ptr, convert(T, x), i)
 end
 
 @propagate_inbounds function Base.getindex(A::WardedArray, inds::Integer...)
@@ -37,9 +35,13 @@ end
     setindex!(A, x, i)
 end
 
-
-@noinline bnds_err(len, i) =
-    error("Attempted out of bounds length $len WardedArray access at index $i")
+struct BndsErr{N, T}
+    size::NTuple{N, Int}
+    ind::T
+end
+function Base.showerror(io::IO, (;size, ind)::BndsErr)
+    print(io, "Attempted to access a size $size WardedArray at index $ind")
+end
 
 
 Base.iscontiguous(::WardedArray) = true
@@ -65,21 +67,21 @@ function no_escape(f, ::Type{T}, ::Val{SZ}) where {T, SZ}
     end
     nbytes = len * sizeof(T)
     if nbytes <= ALLOCA_LIMIT
-        _with_alloca(f, T, sz, Val(len))
+        _with_static(f, T, sz, Val(len))
     else
-        _with_malloc(f, T, sz, nbytes)
+        _with_dynamic(f, T, sz, nbytes, nothing)
     end
 end
-function no_escape(f, ::Type{T}, sz...) where {T}
+function no_escape(f, ::Type{T}, sz...; buffer=nothing) where {T}
     isbitstype(T) || error("Only isbits is allowed!")
     let v_dummy = WardedArray(Ptr{T}(0), sz, Ref(nothing))
         check_escapes(f, v_dummy)
     end
     nbytes = sizeof(T) * prod(sz)
-    _with_malloc(f, T, sz, nbytes)
+    _with_dynamic(f, T, sz, nbytes, buffer)
 end
 
-function _with_alloca(f, ::Type{T}, n, ::Val{AllocSize}) where {T, AllocSize}
+function _with_static(f, ::Type{T}, n, ::Val{AllocSize}) where {T, AllocSize}
     mem = Ref{NTuple{AllocSize, T}}()
     GC.@preserve mem begin
         ptr::Ptr{T} = pointer_from_objref(mem)
@@ -87,23 +89,28 @@ function _with_alloca(f, ::Type{T}, n, ::Val{AllocSize}) where {T, AllocSize}
         f(v)
     end
 end
-function _with_malloc(f, ::Type{T}, sz, nbytes) where {T}
-    ptr::Ptr{T} = Libc.malloc(nbytes)
+
+function _with_dynamic(f, ::Type{T}, sz, nbytes, buffer) where {T}
+    Bumper.@no_escape buffer begin
+        ptr::Ptr{T} = @alloc_ptr(nbytes)
+        v = WardedArray(ptr, sz, nothing)
+        f(v)
+    end
+end
+
+malloc(n) = Libc.malloc(n)
+free(ptr) = Libc.free(ptr)
+
+function _with_dynamic(f, ::Type{T}, sz, nbytes, ::Nothing) where {T}
+    ptr::Ptr{T} = malloc(nbytes)
     v = WardedArray(ptr, sz, nothing)
     try
         f(v)
     finally
-        Libc.free(ptr)
+        free(ptr)
     end
 end
 
-# using Accessors
-# function check_escapes(f, ::Type{T}, n, handle) where {T}
-#     _check_escapes(handle) do handle
-#         v = WardedArray(Ptr{T}(0), n, handle)
-#         f(v)
-#     end
-# end
 check_escapes(f, v) = _check_escapes(f, v)
 function __check_escapes(world::UInt, mthd, this, fargtypes)
     tt = Base.to_tuple_type(fargtypes)

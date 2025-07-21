@@ -67,26 +67,64 @@ BenchmarkTools.Trial: 10000 samples with 999 evaluations per sample.
  Memory estimate: 0 bytes, allocs estimate: 0.
 ```
 
-Dynamic size:
+Dynamic size using `malloc`/`free`:
 
 ```julia
 julia> @benchmark no_escape(Float64, 32) do v
            v .= 1
            sum(v)
        end
-BenchmarkTools.Trial: 10000 samples with 993 evaluations per sample.
- Range (min … max):  34.909 ns … 358.367 ns  ┊ GC (min … max): 0.00% … 0.00%
- Time  (median):     36.675 ns               ┊ GC (median):    0.00%
- Time  (mean ± σ):   36.837 ns ±   6.672 ns  ┊ GC (mean ± σ):  0.00% ± 0.00%
+BenchmarkTools.Trial: 10000 samples with 996 evaluations per sample.
+ Range (min … max):  26.477 ns … 46.397 ns  ┊ GC (min … max): 0.00% … 0.00%
+ Time  (median):     26.979 ns              ┊ GC (median):    0.00%
+ Time  (mean ± σ):   27.089 ns ±  0.651 ns  ┊ GC (mean ± σ):  0.00% ± 0.00%
 
-    ▄▂▂▁▂▂▁▁  ▁▂▂▄█▇▅▅▅▂                                       ▁
-  ███████████▅██████████▆▆▅▄▄▃▅▅▅▅▄▅▅▄▅▂▅▅▄▅▃▄▄▂▃▄▄▄▅▅▄▅▅▆▅▅▅▅ █
-  34.9 ns       Histogram: log(frequency) by time      41.2 ns <
+        ▅█▇▅▄▁▁▂▄▃▃▁                                          ▂
+  ▇█▇▄▁▁█████████████▄▄▃▃▃▄▃▄▁▁▁▃▃▁▃▁▁▁▃▁▁▁▃▁▁▁▁▃▃▃▃▁▃▁▁▁▆▄▄▄ █
+  26.5 ns      Histogram: log(frequency) by time      30.2 ns <
 
  Memory estimate: 0 bytes, allocs estimate: 0.
 ```
 
-And here's the same benchmark using `Memory` for comparison:
+Dynamic size with Bumper.jl allocators:
+
+```julia
+julia> using Bumper: default_buffer, AllocBuffer
+
+julia> @benchmark no_escape(Float64, 32; buffer) do v
+           v .= 1
+           sum(v)
+       end setup=(buffer=default_buffer())
+BenchmarkTools.Trial: 10000 samples with 998 evaluations per sample.
+ Range (min … max):  15.199 ns … 152.292 ns  ┊ GC (min … max): 0.00% … 0.00%
+ Time  (median):     15.922 ns               ┊ GC (median):    0.00%
+ Time  (mean ± σ):   16.444 ns ±   4.846 ns  ┊ GC (mean ± σ):  0.00% ± 0.00%
+
+  ▁ ▄█▇▄                                ▁                      ▁
+  █▅████▄▄▁▃▃▃▄▃▄▆▆▆▅▆▆▆▅▅▆▅▅▄▅▅▄▅▅▅▅▄▆▆█▇▄▁▃▇▇▄▃▃▃▄▄▃▁▄▁▁▃▄▆▆ █
+  15.2 ns       Histogram: log(frequency) by time      26.7 ns <
+
+ Memory estimate: 0 bytes, allocs estimate: 0.
+
+julia> @benchmark no_escape(Float64, 32; buffer) do v
+           v .= 1
+           sum(v)
+       end setup=(buffer=AllocBuffer(100000))
+BenchmarkTools.Trial: 10000 samples with 999 evaluations per sample.
+ Range (min … max):  12.997 ns … 48.058 ns  ┊ GC (min … max): 0.00% … 0.00%
+ Time  (median):     13.388 ns              ┊ GC (median):    0.00%
+ Time  (mean ± σ):   13.774 ns ±  1.461 ns  ┊ GC (mean ± σ):  0.00% ± 0.00%
+
+  ▂▅██▅▃▄▂     ▁       ▁▁▁                              ▁▂▂   ▂
+  ████████▇█▆███▆▆▅▅▅▄▄███▆▄▄▁▄▅▅▄▄▅▅▆▅▅▄▃▅▄▃▅▄▁▄▃▅▃▄▄▅▅███▆▆ █
+  13 ns        Histogram: log(frequency) by time      20.4 ns <
+
+ Memory estimate: 0 bytes, allocs estimate: 0.
+```
+
+____________
+
+For comparison, here's the same benchmark using `Memory`:
 
 ```julia
 julia> @benchmark let v= Memory{Float64}(undef, 32)
@@ -94,13 +132,13 @@ julia> @benchmark let v= Memory{Float64}(undef, 32)
            sum(v)
        end
 BenchmarkTools.Trial: 10000 samples with 998 evaluations per sample.
- Range (min … max):  14.064 ns …  1.499 μs  ┊ GC (min … max):  0.00% … 97.58%
- Time  (median):     21.152 ns              ┊ GC (median):     0.00%
- Time  (mean ± σ):   27.554 ns ± 50.980 ns  ┊ GC (mean ± σ):  23.57% ± 12.30%
+ Range (min … max):  14.051 ns …  3.165 μs  ┊ GC (min … max):  0.00% … 98.50%
+ Time  (median):     22.050 ns              ┊ GC (median):     0.00%
+ Time  (mean ± σ):   29.199 ns ± 61.733 ns  ┊ GC (mean ± σ):  21.74% ± 10.88%
 
-  ▇█▃ ▁                                                       ▁
-  █████▆▅▃▁▃▁▃▄▅▃▁▁▃▁▃▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▃▄▆▆▇▇▇ █
-  14.1 ns      Histogram: log(frequency) by time       352 ns <
+  ▆█▃▂                                                        ▁
+  ████▇▆▅▁▁▁▄▅▅▅▁▃▃▁▁▃▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▃▁▄▅▆▆▆ █
+  14.1 ns      Histogram: log(frequency) by time       414 ns <
 
  Memory estimate: 288 bytes, allocs estimate: 1.
 ```
